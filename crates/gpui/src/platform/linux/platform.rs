@@ -26,7 +26,7 @@ use crate::{
     ForegroundExecutor, Keymap, LinuxDispatcher, Menu, MenuItem, OwnedMenu, PathPromptOptions,
     Pixels, Platform, PlatformDisplay, PlatformKeyboardLayout, PlatformKeyboardMapper,
     PlatformTextSystem, PlatformWindow, Point, PriorityQueueCalloopReceiver, Result,
-    RunnableVariant, Task, WindowAppearance, WindowParams, px,
+    RunnableVariant, Task, Tray, WindowAppearance, WindowParams, px,
 };
 
 #[cfg(any(feature = "wayland", feature = "x11"))]
@@ -526,6 +526,10 @@ impl<P: LinuxClient + 'static> Platform for P {
     }
 
     fn set_dock_menu(&self, _menu: Vec<MenuItem>, _keymap: &Keymap) {
+        // todo(linux)
+    }
+
+    fn set_tray(&self, mut _tray: Tray, _menu: Option<Vec<MenuItem>>, _keymap: &Keymap) {
         // todo(linux)
     }
 
