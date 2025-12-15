@@ -1238,7 +1238,7 @@ mod tests {
 
     #[ctor::ctor]
     fn init_logger() {
-        zlog::init_test();
+        let _ = env_logger::try_init();
     }
 
     #[test]

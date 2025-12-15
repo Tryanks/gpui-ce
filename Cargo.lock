@@ -5442,6 +5442,7 @@ version = "0.1.0"
 dependencies = [
  "arrayvec",
  "ctor",
+ "env_logger",
  "log",
  "rand 0.9.2",
  "rayon",
