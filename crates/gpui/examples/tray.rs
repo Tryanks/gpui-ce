@@ -1,6 +1,6 @@
 use gpui::{
     App, Application, Context, Div, Global, MenuItem, SharedString, Stateful, Tray, Window,
-    WindowOptions, actions, div, prelude::*,
+    WindowOptions, actions, div, prelude::*, QuitMode
 };
 
 struct Example;
@@ -52,7 +52,9 @@ impl Render for Example {
 }
 
 fn main() {
-    Application::new().run(|cx: &mut App| {
+    Application::new()
+        .with_quit_mode(QuitMode::Explicit)
+        .run(|cx: &mut App| {
         cx.set_global(AppState::new());
 
         // Bring the menu bar to the foreground (so you can see the menu bar)
