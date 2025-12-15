@@ -59,6 +59,10 @@ use crate::platform::{
         xdg_desktop_portal::{Event as XDPEvent, XDPEventSource},
     },
 };
+use crate::platform::linux::xdg_desktop_portal::status_notifier::{
+    StatusNotifierItem, StatusNotifierItemEvents, StatusNotifierItemOptions,
+    dbusmenu::DBusMenu,
+};
 use crate::{
     AnyWindowHandle, Bounds, ClipboardItem, CursorStyle, DisplayId, FileDropEvent, Keystroke,
     LinuxKeyboardLayout, Modifiers, ModifiersChangedEvent, MouseButton, Pixels, Platform,
@@ -1694,6 +1698,49 @@ impl LinuxClient for X11Client {
             .map(|window| window.window.x_window as u64)
             .map(|x_window| std::future::ready(Some(WindowIdentifier::from_xid(x_window))))
             .unwrap_or(std::future::ready(None))
+    }
+
+    fn set_tray_item(
+        &self,
+        options: StatusNotifierItemOptions,
+        menu: Option<crate::platform::linux::xdg_desktop_portal::status_notifier::dbusmenu::Menu>,
+    ) {
+        let state = self.0.clone();
+        self.0
+            .borrow()
+            .common
+            .foreground_executor
+            .spawn({
+                let state = state.clone();
+                async move {
+                    let menu = if let Some(menu) = menu {
+                         DBusMenu::new(menu).await.log_err()
+                    } else {
+                        None
+                    };
+
+                    let item = StatusNotifierItem::new(1, options, menu).await.log_err();
+                    if let Some(item) = item {
+                        let mut state = state.borrow_mut();
+                        if let Some(token) = state.common.tray_item_token {
+                            state.loop_handle.remove(token);
+                        }
+                        state.common.tray_item_token = state
+                            .loop_handle
+                            .insert_source(item, |event, _, client| {
+                                // TODO: Handle events
+                                match event {
+                                    StatusNotifierItemEvents::Activate(x, y) => {}
+                                    StatusNotifierItemEvents::SecondaryActivate(x, y) => {}
+                                    StatusNotifierItemEvents::MenuEvent(event) => {}
+                                    _ => {}
+                                }
+                            })
+                            .log_err().ok();
+                    }
+                }
+            })
+            .detach();
     }
 }
 

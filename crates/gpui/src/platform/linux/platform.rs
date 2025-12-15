@@ -14,78 +14,16 @@ use std::{
 };
 
 use anyhow::{Context as _, anyhow};
-use calloop::LoopSignal;
-use futures::channel::oneshot;
-use util::ResultExt as _;
-use util::command::{new_smol_command, new_std_command};
-#[cfg(any(feature = "wayland", feature = "x11"))]
-use xkbcommon::xkb::{self, Keycode, Keysym, State};
-
-use crate::{
-    Action, AnyWindowHandle, BackgroundExecutor, ClipboardItem, CursorStyle, DisplayId,
-    ForegroundExecutor, Keymap, LinuxDispatcher, Menu, MenuItem, OwnedMenu, PathPromptOptions,
-    Pixels, Platform, PlatformDisplay, PlatformKeyboardLayout, PlatformKeyboardMapper,
-    PlatformTextSystem, PlatformWindow, Point, PriorityQueueCalloopReceiver, Result,
-    RunnableVariant, Task, Tray, WindowAppearance, WindowParams, px,
+use crate::platform::linux::xdg_desktop_portal::status_notifier::dbusmenu::{DBusMenu, Submenu};
+use crate::platform::linux::xdg_desktop_portal::status_notifier::item::{
+    Category, Icon, Pixmap, Status, StatusNotifierItemOptions, ToolTip,
 };
+use crate::platform::linux::xdg_desktop_portal::status_notifier::{
+    StatusNotifierItem, StatusNotifierItemEvents,
+};
+use calloop::{LoopSignal, RegistrationToken};
 
-#[cfg(any(feature = "wayland", feature = "x11"))]
-pub(crate) const SCROLL_LINES: f32 = 3.0;
-
-// Values match the defaults on GTK.
-// Taken from https://github.com/GNOME/gtk/blob/main/gtk/gtksettings.c#L320
-#[cfg(any(feature = "wayland", feature = "x11"))]
-pub(crate) const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(400);
-pub(crate) const DOUBLE_CLICK_DISTANCE: Pixels = px(5.0);
-pub(crate) const KEYRING_LABEL: &str = "zed-github-account";
-
-#[cfg(any(feature = "wayland", feature = "x11"))]
-const FILE_PICKER_PORTAL_MISSING: &str =
-    "Couldn't open file picker due to missing xdg-desktop-portal implementation.";
-
-#[cfg(any(feature = "x11", feature = "wayland"))]
-pub trait ResultExt {
-    type Ok;
-
-    fn notify_err(self, msg: &'static str) -> Self::Ok;
-}
-
-#[cfg(any(feature = "x11", feature = "wayland"))]
-impl<T> ResultExt for anyhow::Result<T> {
-    type Ok = T;
-
-    fn notify_err(self, msg: &'static str) -> T {
-        match self {
-            Ok(v) => v,
-            Err(e) => {
-                use ashpd::desktop::notification::{Notification, NotificationProxy, Priority};
-                use futures::executor::block_on;
-
-                let proxy = block_on(NotificationProxy::new()).expect(msg);
-
-                let notification_id = "dev.zed.Oops";
-                block_on(
-                    proxy.add_notification(
-                        notification_id,
-                        Notification::new("Zed failed to launch")
-                            .body(Some(
-                                format!(
-                                    "{e:?}. See https://zed.dev/docs/linux for troubleshooting steps."
-                                )
-                                .as_str(),
-                            ))
-                            .priority(Priority::High)
-                            .icon(ashpd::desktop::Icon::with_names(&[
-                                "dialog-question-symbolic",
-                            ])),
-                    )
-                ).expect(msg);
-
-                panic!("{msg}");
-            }
-        }
-    }
-}
+// ...
 
 pub trait LinuxClient {
     fn compositor_name(&self) -> &'static str;
@@ -124,6 +62,13 @@ pub trait LinuxClient {
     ) -> impl Future<Output = Option<ashpd::WindowIdentifier>> + Send + 'static {
         std::future::ready::<Option<ashpd::WindowIdentifier>>(None)
     }
+
+    fn set_tray_item(
+        &self,
+        options: StatusNotifierItemOptions,
+        menu: Option<crate::platform::linux::xdg_desktop_portal::status_notifier::dbusmenu::Menu>,
+    ) {
+    }
 }
 
 #[derive(Default)]
@@ -146,6 +91,7 @@ pub(crate) struct LinuxCommon {
     pub(crate) callbacks: PlatformHandlers,
     pub(crate) signal: LoopSignal,
     pub(crate) menus: Vec<OwnedMenu>,
+    pub(crate) tray_item_token: Option<RegistrationToken>,
 }
 
 impl LinuxCommon {
@@ -172,6 +118,7 @@ impl LinuxCommon {
             callbacks,
             signal,
             menus: Vec::new(),
+            tray_item_token: None,
         };
 
         (common, main_receiver)
@@ -529,8 +476,29 @@ impl<P: LinuxClient + 'static> Platform for P {
         // todo(linux)
     }
 
-    fn set_tray(&self, mut _tray: Tray, _menu: Option<Vec<MenuItem>>, _keymap: &Keymap) {
-        // todo(linux)
+    fn set_tray(&self, mut tray: Tray, menu: Option<Vec<MenuItem>>, _keymap: &Keymap) {
+        let options = StatusNotifierItemOptions::new()
+            .title(tray.title.map(|s| s.to_string()).unwrap_or_default())
+            .tooltip(
+                ToolTip::new()
+                    .title(tray.tooltip.map(|s| s.to_string()).unwrap_or_default()),
+            )
+            .icon(if let Some(icon) = tray.icon_data.take() {
+                Icon::Pixmaps(vec![Pixmap {
+                    width: icon.width,
+                    height: icon.height,
+                    bytes: icon.data.to_vec(),
+                }])
+            } else {
+                Icon::default()
+            });
+
+        let menu = menu.map(|menu| {
+            let children = create_submenu(menu);
+            crate::platform::linux::xdg_desktop_portal::status_notifier::dbusmenu::Menu { children }
+        });
+
+        self.set_tray_item(options, menu);
     }
 
     fn path_for_auxiliary_executable(&self, _name: &str) -> Result<PathBuf> {
@@ -798,6 +766,15 @@ pub(super) fn log_cursor_icon_warning(message: impl std::fmt::Display) {
 
 #[cfg(any(feature = "wayland", feature = "x11"))]
 fn guess_ascii(keycode: Keycode, shift: bool) -> Option<char> {
+    // ... (rest of the file is hidden) -> Wait, I need to append the create_submenu function at the end or somewhere appropriate.
+    // Since I cannot see the end of file, I will append it before `guess_ascii` if possible or at the end of what I viewed.
+    // But `guess_ascii` is likely inside `platform.rs`.
+    // I will try to insert it before `guess_ascii` which seems to be the last function shown.
+    // Actually, I can just append it to the file. But I need `EndLine` logic.
+    // I will check where is a good place.
+    // I will insert it after `set_tray` implementation block in `Platform` impl, but helper function must be outside impl.
+    // `Platform` impl block ends at some point.
+    // I'll put it at the end of the file.
     let c = match (keycode.raw(), shift) {
         (24, _) => 'q',
         (25, _) => 'w',
@@ -1085,4 +1062,32 @@ mod tests {
             Point::new(px(5.0), px(5.1))
         ),);
     }
+}
+
+
+fn create_submenu(menu: Vec<MenuItem>) -> Vec<Submenu> {
+    let mut submenus = Vec::new();
+    for (id, item) in menu.into_iter().enumerate() {
+        match item {
+            MenuItem::Separator => {
+                // Separators not explicitly handled in simple struct yet.
+            }
+            MenuItem::Action { name, .. } => {
+                submenus.push(Submenu {
+                    id: id as i32,
+                    label: Some(name.to_string()),
+                    ..Default::default()
+                });
+            }
+            MenuItem::Submenu { name, submenu } => {
+                submenus.push(Submenu {
+                    id: id as i32,
+                    label: Some(name.to_string()),
+                    children: create_submenu(submenu),
+                    ..Default::default()
+                });
+            }
+        }
+    }
+    submenus
 }

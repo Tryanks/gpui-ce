@@ -9,6 +9,8 @@ use smol::stream::StreamExt;
 
 use crate::{BackgroundExecutor, WindowAppearance};
 
+pub mod status_notifier;
+
 pub enum Event {
     WindowAppearance(WindowAppearance),
     #[cfg_attr(feature = "x11", allow(dead_code))]

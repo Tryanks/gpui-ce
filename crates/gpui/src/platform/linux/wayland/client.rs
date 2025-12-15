@@ -97,6 +97,10 @@ use crate::{
         xdg_desktop_portal::{Event as XDPEvent, XDPEventSource},
     },
 };
+use crate::platform::linux::xdg_desktop_portal::status_notifier::{
+    StatusNotifierItem, StatusNotifierItemEvents, StatusNotifierItemOptions,
+    dbusmenu::DBusMenu,
+};
 
 /// Used to convert evdev scancode to xkb scancode
 const MIN_KEYCODE: u32 = 8;
@@ -795,6 +799,55 @@ impl LinuxClient for WaylandClient {
             let executor = state.common.background_executor.clone();
             open_uri_internal(executor, uri, None);
         }
+    }
+
+    fn set_tray_item(
+        &self,
+        options: StatusNotifierItemOptions,
+        menu: Option<crate::platform::linux::xdg_desktop_portal::status_notifier::dbusmenu::Menu>,
+    ) {
+        let state = self.0.clone();
+        self.0
+            .borrow()
+            .common
+            .foreground_executor
+            .spawn({
+                let state = state.clone();
+                async move {
+                    let menu = if let Some(menu) = menu {
+                         DBusMenu::new(menu).await.log_err()
+                    } else {
+                        None
+                    };
+
+                    let item = StatusNotifierItem::new(1, options, menu).await.log_err();
+                    if let Some(item) = item {
+                        let mut state = state.borrow_mut();
+                        if let Some(token) = state.common.tray_item_token {
+                            state.loop_handle.remove(token);
+                        }
+                        state.common.tray_item_token = state
+                            .loop_handle
+                            .insert_source(item, |event, _, client| {
+                                // TODO: Handle events
+                                match event {
+                                    StatusNotifierItemEvents::Activate(x, y) => {
+                                        // Handle left click
+                                    }
+                                    StatusNotifierItemEvents::SecondaryActivate(x, y) => {
+                                        // Handle middle click
+                                    }
+                                    StatusNotifierItemEvents::MenuEvent(event) => {
+                                        // Handle menu event
+                                    }
+                                    _ => {}
+                                }
+                            })
+                            .log_err().ok();
+                    }
+                }
+            })
+            .detach();
     }
 
     fn reveal_path(&self, path: PathBuf) {

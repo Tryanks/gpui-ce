@@ -175,6 +175,7 @@ oo7 = { version = "0.5.0", default-features = false, features = [
     "async-std",
     "native_crypto",
 ] }
+zbus = "4.2.2"
 
 # Used in both windowing options
 ashpd = { workspace = true, optional = true }
