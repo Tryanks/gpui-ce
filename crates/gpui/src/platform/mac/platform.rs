@@ -1520,16 +1520,47 @@ extern "C" fn open_urls(this: &mut Object, _: Sel, _: id, urls: id) {
 extern "C" fn handle_menu_item(this: &mut Object, _: Sel, item: id) {
     unsafe {
         let platform = get_mac_platform(this);
+
+        // AppKit expects menu tracking / status item highlighting to be cleaned up synchronously
+        // after the menu action returns. If we open/activate windows inside this callback, it can
+        // interfere with that cleanup (e.g. status bar highlight not resetting). Defer dispatching
+        // the action to the next runloop tick on the main queue.
         let mut lock = platform.0.lock();
-        if let Some(mut callback) = lock.menu_command.take() {
-            let tag: NSInteger = msg_send![item, tag];
-            let index = tag as usize;
-            if let Some(action) = lock.menu_actions.get(index) {
-                let action = action.boxed_clone();
-                drop(lock);
-                callback(&*action);
+        let tag: NSInteger = msg_send![item, tag];
+        let index = tag as usize;
+        let action = lock.menu_actions.get(index).map(|action| action.boxed_clone());
+        drop(lock);
+
+        if let Some(action) = action {
+            use super::dispatcher::{dispatch_get_main_queue, dispatch_sys::dispatch_async_f};
+
+            struct MenuCommandContext {
+                platform: *const MacPlatform,
+                action: Box<dyn Action>,
             }
-            platform.0.lock().menu_command.get_or_insert(callback);
+
+            unsafe extern "C" fn run_menu_command(context: *mut c_void) {
+                let context: Box<MenuCommandContext> = unsafe { Box::from_raw(context as _) };
+                let platform = unsafe { &*context.platform };
+
+                let mut lock = platform.0.lock();
+                if let Some(mut callback) = lock.menu_command.take() {
+                    drop(lock);
+                    callback(context.action.as_ref());
+                    platform.0.lock().menu_command.get_or_insert(callback);
+                }
+            }
+
+            let context = Box::new(MenuCommandContext {
+                platform: platform as *const _,
+                action,
+            });
+
+            dispatch_async_f(
+                dispatch_get_main_queue(),
+                Box::into_raw(context) as *mut c_void,
+                Some(run_menu_command),
+            );
         }
     }
 }
