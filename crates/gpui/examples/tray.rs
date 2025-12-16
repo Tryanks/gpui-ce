@@ -128,6 +128,7 @@ impl AppState {
                     gpui::ImageFormat::Png,
                     include_bytes!("image/app-icon.png").to_vec(),
                 ))
+                .icon_as_template(cfg!(target_os = "macos"))
                 .title("Tray App")
                 .tooltip("This is a tray icon")
                 .menu(Self::build_menus),
