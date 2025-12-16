@@ -55,31 +55,31 @@ fn main() {
     Application::new()
         .with_quit_mode(QuitMode::Explicit)
         .run(|cx: &mut App| {
-        cx.set_global(AppState::new());
+            cx.set_global(AppState::new());
 
-        // Bring the menu bar to the foreground (so you can see the menu bar)
-        cx.activate(true);
-        // Register the `quit` function so it can be referenced by the `MenuItem::action` in the menu bar
-        cx.on_action(quit);
-        cx.on_action(toggle_check);
-        cx.on_action(toggle_visible);
-        cx.on_action(hide_window);
-        cx.on_action(show_window);
+            // Bring the menu bar to the foreground (so you can see the menu bar)
+            cx.activate(true);
+            // Register the `quit` function so it can be referenced by the `MenuItem::action` in the menu bar
+            cx.on_action(quit);
+            cx.on_action(toggle_check);
+            cx.on_action(toggle_visible);
+            cx.on_action(hide_window);
+            cx.on_action(show_window);
 
-        // Hide Dock icon when last window is closed
-        cx.on_window_closed(|cx| {
-            if cx.windows().is_empty() {
-                cx.set_shows_in_dock(false);
-            }
-        })
-        .detach();
+            // Hide Dock icon when last window is closed
+            cx.on_window_closed(|cx| {
+                if cx.windows().is_empty() {
+                    cx.set_shows_in_dock(false);
+                }
+            })
+            .detach();
 
-        cx.open_window(WindowOptions::default(), |_, cx| cx.new(|_| Example))
-            .unwrap();
+            cx.open_window(WindowOptions::default(), |_, cx| cx.new(|_| Example))
+                .unwrap();
 
-        let app_state = cx.global::<AppState>();
-        cx.set_tray(app_state.tray.clone());
-    });
+            let app_state = cx.global::<AppState>();
+            cx.set_tray(app_state.tray.clone());
+        });
 }
 
 #[derive(PartialEq)]
@@ -163,7 +163,10 @@ impl AppState {
 impl Global for AppState {}
 
 // Associate actions using the `actions!` macro (or `Action` derive macro)
-actions!(example, [Quit, ToggleCheck, ToggleVisible, HideWindow, ShowWindow]);
+actions!(
+    example,
+    [Quit, ToggleCheck, ToggleVisible, HideWindow, ShowWindow]
+);
 
 // Define the quit function that is registered with the App
 fn quit(_: &Quit, cx: &mut App) {
