@@ -1954,6 +1954,11 @@ impl App {
             .set_tray(tray, menu_items, &self.keymap.borrow())
     }
 
+    /// macOS only: controls whether the app shows in the Dock. No-op on other platforms.
+    pub fn set_shows_in_dock(&self, show: bool) {
+        self.platform.set_shows_in_dock(show);
+    }
+
     /// Performs the action associated with the given dock menu item, only used on Windows for now.
     pub fn perform_dock_menu_action(&self, action: usize) {
         self.platform.perform_dock_menu_action(action);

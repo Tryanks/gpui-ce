@@ -242,6 +242,8 @@ pub(crate) trait Platform: 'static {
     fn set_dock_menu(&self, menu: Vec<MenuItem>, keymap: &Keymap);
     fn set_tray(&self, tray: Tray, menu: Option<Vec<MenuItem>>, keymap: &Keymap);
     fn perform_dock_menu_action(&self, _action: usize) {}
+    /// macOS only: controls whether the app shows in the Dock. No-op on other platforms.
+    fn set_shows_in_dock(&self, _show: bool) {}
     fn add_recent_document(&self, _path: &Path) {}
     fn update_jump_list(
         &self,
