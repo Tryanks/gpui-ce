@@ -13,6 +13,13 @@ pub struct Tray {
     pub icon: Option<Rc<gpui::Image>>,
     pub(crate) icon_data: Option<TrayIconData>,
 
+    /// Whether the icon should be treated as a template image on platforms that support it
+    /// (e.g. macOS menu bar).
+    ///
+    /// Template images are typically single-color glyphs that the system can automatically
+    /// render appropriately for light/dark appearances.
+    pub icon_is_template: bool,
+
     /// Function to build the context menu.
     pub menu_builder: Option<Rc<dyn Fn(&mut App) -> Vec<MenuItem>>>,
     /// Visibility of the tray icon.
@@ -52,6 +59,7 @@ impl Tray {
             title: None,
             icon: None,
             icon_data: None,
+            icon_is_template: false,
             menu_builder: None,
             visible: true,
         }
@@ -72,6 +80,15 @@ impl Tray {
     /// Set the icon image, defaults to None.
     pub fn icon(mut self, icon: impl Into<gpui::Image>) -> Self {
         self.icon = Some(Rc::new(icon.into()));
+        self
+    }
+
+    /// On supported platforms (e.g. macOS), mark the tray icon image as a template.
+    ///
+    /// When set to `true`, the system may automatically adjust the icon for light/dark mode.
+    /// Default is `false`.
+    pub fn icon_as_template(mut self, is_template: bool) -> Self {
+        self.icon_is_template = is_template;
         self
     }
 

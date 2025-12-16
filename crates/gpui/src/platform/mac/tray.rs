@@ -85,7 +85,7 @@ impl MacTray {
                 button.setImage_(nsimage);
                 let _: () = msg_send![nsimage, setSize: new_size];
                 let _: () = msg_send![button, setImagePosition: NSCellImagePosition::ImageLeft];
-                let _: () = msg_send![nsimage, setTemplate: false];
+                let _: () = msg_send![nsimage, setTemplate: tray.icon_is_template];
             } else {
                 button.setImage_(nil);
             }
