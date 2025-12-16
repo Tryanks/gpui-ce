@@ -15,7 +15,7 @@ use anyhow::{Context as _, anyhow};
 use block::ConcreteBlock;
 use cocoa::{
     appkit::{
-        NSApplication, NSApplicationActivationPolicy::NSApplicationActivationPolicyRegular,
+        NSApplication, NSApplicationActivationPolicy::{NSApplicationActivationPolicyRegular, NSApplicationActivationPolicyAccessory},
         NSEventModifierFlags, NSMenu, NSMenuItem, NSModalResponse, NSOpenPanel, NSPasteboard,
         NSPasteboardTypePNG, NSPasteboardTypeRTF, NSPasteboardTypeRTFD, NSPasteboardTypeString,
         NSPasteboardTypeTIFF, NSSavePanel, NSVisualEffectState, NSVisualEffectView, NSWindow,
@@ -973,6 +973,17 @@ impl Platform for MacPlatform {
         } else {
             let mut new_tray = MacTray::create(&tray, tray_menu);
             state.tray = Some(new_tray);
+        }
+    }
+
+    fn set_shows_in_dock(&self, show: bool) {
+        unsafe {
+            let app: id = msg_send![APP_CLASS, sharedApplication];
+            if show {
+                app.setActivationPolicy_(NSApplicationActivationPolicyRegular);
+            } else {
+                app.setActivationPolicy_(NSApplicationActivationPolicyAccessory);
+            }
         }
     }
 
