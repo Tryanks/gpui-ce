@@ -1,6 +1,6 @@
 use gpui::{
-    App, Application, Context, Div, Global, MenuItem, SharedString, Stateful, Tray, Window,
-    WindowOptions, actions, div, prelude::*, QuitMode
+    App, Application, Context, Div, Global, MenuItem, QuitMode, SharedString, Stateful, Tray,
+    Window, WindowOptions, actions, div, prelude::*,
 };
 
 struct Example;
@@ -63,6 +63,16 @@ fn main() {
         cx.on_action(quit);
         cx.on_action(toggle_check);
         cx.on_action(toggle_visible);
+        cx.on_action(hide_window);
+        cx.on_action(show_window);
+
+        // Hide Dock icon when last window is closed
+        cx.on_window_closed(|cx| {
+            if cx.windows().is_empty() {
+                cx.set_shows_in_dock(false);
+            }
+        })
+        .detach();
 
         cx.open_window(WindowOptions::default(), |_, cx| cx.new(|_| Example))
             .unwrap();
@@ -133,6 +143,9 @@ impl AppState {
             MenuItem::action(ViewMode::Grid, ToggleCheck)
                 .checked(app_state.view_mode == ViewMode::Grid),
             MenuItem::separator(),
+            MenuItem::action("Hide Window", HideWindow),
+            MenuItem::action("Show Window", ShowWindow),
+            MenuItem::separator(),
             MenuItem::action("Hide Tray Icon", ToggleVisible),
             MenuItem::submenu(gpui::Menu {
                 name: "Submenu".into(),
@@ -150,7 +163,7 @@ impl AppState {
 impl Global for AppState {}
 
 // Associate actions using the `actions!` macro (or `Action` derive macro)
-actions!(example, [Quit, ToggleCheck, ToggleVisible]);
+actions!(example, [Quit, ToggleCheck, ToggleVisible, HideWindow, ShowWindow]);
 
 // Define the quit function that is registered with the App
 fn quit(_: &Quit, cx: &mut App) {
@@ -181,4 +194,29 @@ fn toggle_visible(_: &ToggleVisible, cx: &mut App) {
     let app_state = cx.global::<AppState>();
     cx.set_tray(app_state.tray.clone());
     cx.refresh_windows();
+}
+
+fn hide_window(_: &HideWindow, cx: &mut App) {
+    // Use defer to avoid reentrancy conflict when closing the active window
+    cx.defer(|cx| {
+        let handles: Vec<_> = cx.windows().iter().cloned().collect();
+        for handle in handles {
+            let _ = handle.update(cx, |_, window, _| {
+                window.remove_window();
+            });
+        }
+    });
+}
+
+fn show_window(_: &ShowWindow, cx: &mut App) {
+    cx.set_shows_in_dock(true);
+
+    if cx.active_window().is_some() || !cx.windows().is_empty() {
+        cx.activate(true);
+        return;
+    }
+
+    cx.open_window(WindowOptions::default(), |_, cx| cx.new(|_| Example))
+        .unwrap();
+    cx.activate(true);
 }
