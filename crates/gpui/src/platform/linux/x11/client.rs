@@ -1,4 +1,4 @@
-use crate::{Capslock, ResultExt as _, RunnableVariant, TaskTiming, profiler, xcb_flush};
+use crate::{Capslock, RunnableVariant, TaskTiming, profiler, xcb_flush};
 use anyhow::{Context as _, anyhow};
 use ashpd::WindowIdentifier;
 use calloop::{
@@ -59,9 +59,9 @@ use crate::platform::{
         xdg_desktop_portal::{Event as XDPEvent, XDPEventSource},
     },
 };
-use crate::platform::linux::xdg_desktop_portal::status_notifier::{
+use crate::platform::linux::xdg_desktop_portal::status_notifier::dbusmenu::DBusMenu;
+use crate::platform::linux::xdg_desktop_portal::status_notifier::item::{
     StatusNotifierItem, StatusNotifierItemEvents, StatusNotifierItemOptions,
-    dbusmenu::DBusMenu,
 };
 use crate::{
     AnyWindowHandle, Bounds, ClipboardItem, CursorStyle, DisplayId, FileDropEvent, Keystroke,

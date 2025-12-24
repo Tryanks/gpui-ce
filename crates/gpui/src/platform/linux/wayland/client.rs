@@ -72,12 +72,12 @@ use super::{
 };
 
 use crate::{
-    AnyWindowHandle, Bounds, Capslock, CursorStyle, DOUBLE_CLICK_INTERVAL, DevicePixels, DisplayId,
-    FileDropEvent, ForegroundExecutor, KeyDownEvent, KeyUpEvent, Keystroke, LinuxCommon,
-    LinuxKeyboardLayout, Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent,
-    MouseExitEvent, MouseMoveEvent, MouseUpEvent, NavigationDirection, Pixels, PlatformDisplay,
-    PlatformInput, PlatformKeyboardLayout, Point, ResultExt as _, SCROLL_LINES, ScrollDelta,
-    ScrollWheelEvent, Size, TouchPhase, WindowParams, point, profiler, px, size,
+    AnyWindowHandle, Bounds, Capslock, CursorStyle, DevicePixels, DisplayId, FileDropEvent,
+    ForegroundExecutor, KeyDownEvent, KeyUpEvent, Keystroke, LinuxCommon, LinuxKeyboardLayout,
+    Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent,
+    MouseUpEvent, NavigationDirection, Pixels, PlatformDisplay, PlatformInput,
+    PlatformKeyboardLayout, Point, ScrollDelta, ScrollWheelEvent, Size, TouchPhase, WindowParams,
+    point, profiler, px, size,
 };
 use crate::{
     RunnableVariant, TaskTiming,
@@ -97,10 +97,11 @@ use crate::{
         xdg_desktop_portal::{Event as XDPEvent, XDPEventSource},
     },
 };
-use crate::platform::linux::xdg_desktop_portal::status_notifier::{
+use crate::platform::linux::xdg_desktop_portal::status_notifier::dbusmenu::DBusMenu;
+use crate::platform::linux::xdg_desktop_portal::status_notifier::item::{
     StatusNotifierItem, StatusNotifierItemEvents, StatusNotifierItemOptions,
-    dbusmenu::DBusMenu,
 };
+use crate::platform::linux::platform::{DOUBLE_CLICK_INTERVAL, SCROLL_LINES};
 
 /// Used to convert evdev scancode to xkb scancode
 const MIN_KEYCODE: u32 = 8;

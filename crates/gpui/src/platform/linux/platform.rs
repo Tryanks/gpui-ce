@@ -13,14 +13,25 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Context as _, anyhow};
+use anyhow::{Context as _, anyhow, Result};
+use futures::channel::oneshot;
+use xkbcommon::xkb::{self, Keysym, Keycode, State};
+use util::command::{new_smol_command, new_std_command};
+use crate::{
+    Action, AnyWindowHandle, BackgroundExecutor, ClipboardItem, CursorStyle, ForegroundExecutor,
+    Keymap, Menu, MenuItem, OwnedMenu, PathPromptOptions, Platform, PlatformKeyboardMapper,
+    PlatformTextSystem, PlatformWindow, RunnableVariant, Task, Tray, WindowAppearance,
+    WindowParams,
+};
 use crate::platform::linux::xdg_desktop_portal::status_notifier::dbusmenu::{DBusMenu, Submenu};
+use crate::platform::linux::dispatcher::{LinuxDispatcher, PriorityQueueCalloopReceiver};
 use crate::platform::linux::xdg_desktop_portal::status_notifier::item::{
     Category, Icon, Pixmap, Status, StatusNotifierItemOptions, ToolTip,
 };
-use crate::platform::linux::xdg_desktop_portal::status_notifier::{
+use crate::platform::linux::xdg_desktop_portal::status_notifier::item::{
     StatusNotifierItem, StatusNotifierItemEvents,
 };
+use crate::{DisplayId, PlatformDisplay, PlatformKeyboardLayout};
 use calloop::{LoopSignal, RegistrationToken};
 
 // ...
@@ -681,6 +692,15 @@ pub(super) fn is_within_click_distance(a: Point<Pixels>, b: Point<Pixels>) -> bo
 }
 
 #[cfg(any(feature = "wayland", feature = "x11"))]
+pub(super) const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(400);
+
+#[cfg(any(feature = "wayland", feature = "x11"))]
+pub(super) const DOUBLE_CLICK_DISTANCE: Pixels = crate::px(5.0);
+
+#[cfg(any(feature = "wayland", feature = "x11"))]
+pub(super) const SCROLL_LINES: f32 = 3.0;
+
+#[cfg(any(feature = "wayland", feature = "x11"))]
 pub(super) fn get_xkb_compose_state(cx: &xkb::Context) -> Option<xkb::compose::State> {
     let mut locales = Vec::default();
     if let Some(locale) = env::var_os("LC_CTYPE") {
@@ -1079,13 +1099,16 @@ fn create_submenu(menu: Vec<MenuItem>) -> Vec<Submenu> {
                     ..Default::default()
                 });
             }
-            MenuItem::Submenu { name, submenu } => {
+            MenuItem::Submenu(sub) => {
                 submenus.push(Submenu {
                     id: id as i32,
-                    label: Some(name.to_string()),
-                    children: create_submenu(submenu),
+                    label: Some(sub.name.to_string()),
+                    children: create_submenu(sub.items),
                     ..Default::default()
                 });
+            }
+            MenuItem::SystemMenu(_) => {
+                // Not supported in tray menu
             }
         }
     }

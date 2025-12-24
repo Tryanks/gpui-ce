@@ -352,7 +352,7 @@ impl StatusNotifierItemInterface {
 
 pub struct StatusNotifierItem(zbus::Connection, InterfaceRef<StatusNotifierItemInterface>);
 
-#[derive(Debug, Clone, Type, serde::Serialize)]
+#[derive(Debug, Clone)]
 pub enum StatusNotifierItemEvents {
     Activate(i32, i32),
     SecondaryActivate(i32, i32),
