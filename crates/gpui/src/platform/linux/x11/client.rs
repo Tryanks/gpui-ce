@@ -1,4 +1,4 @@
-use crate::{Capslock, ResultExt as _, RunnableVariant, TaskTiming, profiler, xcb_flush};
+use crate::{Capslock, RunnableVariant, TaskTiming, profiler, xcb_flush};
 use anyhow::{Context as _, anyhow};
 use ashpd::WindowIdentifier;
 use calloop::{
@@ -59,9 +59,8 @@ use crate::platform::{
         xdg_desktop_portal::{Event as XDPEvent, XDPEventSource},
     },
 };
-use crate::platform::linux::xdg_desktop_portal::status_notifier::{
+use crate::platform::linux::xdg_desktop_portal::status_notifier::item::{
     StatusNotifierItem, StatusNotifierItemEvents, StatusNotifierItemOptions,
-    dbusmenu::DBusMenu,
 };
 use crate::{
     AnyWindowHandle, Bounds, ClipboardItem, CursorStyle, DisplayId, FileDropEvent, Keystroke,
@@ -441,7 +440,7 @@ impl X11Client {
             .to_string();
         let keyboard_layout = LinuxKeyboardLayout::new(layout_name.into());
 
-        let gpu_context = BladeContext::new().notify_err("Unable to init GPU context");
+        let gpu_context = BladeContext::new().expect("Unable to init GPU context");
 
         let resource_database = x11rb::resource_manager::new_from_default(&xcb_connection)
             .context("Failed to create resource database")?;
@@ -1713,12 +1712,7 @@ impl LinuxClient for X11Client {
             .spawn({
                 let state = state.clone();
                 async move {
-                    let menu = if let Some(menu) = menu {
-                         DBusMenu::new(menu).await.log_err()
-                    } else {
-                        None
-                    };
-
+                    // Build the item and let it host the DBusMenu internally
                     let item = StatusNotifierItem::new(1, options, menu).await.log_err();
                     if let Some(item) = item {
                         let mut state = state.borrow_mut();
@@ -1727,16 +1721,21 @@ impl LinuxClient for X11Client {
                         }
                         state.common.tray_item_token = state
                             .loop_handle
-                            .insert_source(item, |event, _, client| {
-                                // TODO: Handle events
+                            .insert_source(item, move |event, _, client| {
                                 match event {
-                                    StatusNotifierItemEvents::Activate(x, y) => {}
-                                    StatusNotifierItemEvents::SecondaryActivate(x, y) => {}
-                                    StatusNotifierItemEvents::MenuEvent(event) => {}
+                                    StatusNotifierItemEvents::MenuEvent(crate::platform::linux::xdg_desktop_portal::status_notifier::dbusmenu::DBusMenuEvents::MenuClick(id)) => {
+                                        let mut state = client.0.borrow_mut();
+                                        if let Some(mut callback) = state.common.callbacks.app_menu_action.take() {
+                                            if let Some(action) = state.common.tray_menu_actions.get(&id).map(|a| a.boxed_clone()) {
+                                                callback(&*action);
+                                            }
+                                            state.common.callbacks.app_menu_action = Some(callback);
+                                        }
+                                    }
                                     _ => {}
                                 }
                             })
-                            .log_err().ok();
+                            .log_err();
                     }
                 }
             })

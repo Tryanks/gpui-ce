@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use calloop::channel::Sender;
 
 use serde::Serialize;
 use zbus::{
@@ -87,6 +88,8 @@ pub struct Menu {
 #[derive(Default)]
 pub struct DBusMenuInterface {
     pub menu: Menu,
+    // Forward DBus menu events to the StatusNotifierItem event stream
+    pub event_sender: Option<Sender<super::item::StatusNotifierItemEvents>>,
 }
 
 #[interface(name = "com.canonical.dbusmenu")]
@@ -112,8 +115,17 @@ impl DBusMenuInterface {
         (0, main_menu)
     }
 
-    // TODO: This is not done.
-    pub async fn event(&self, id: i32, event_id: String, event_data: Value<'_>, timestamp: u32) {}
+    // Minimal event handling: translate a "clicked" event into a MenuClick with the same id
+    pub async fn event(&self, id: i32, event_id: String, _event_data: Value<'_>, _timestamp: u32) {
+        if event_id == "clicked" {
+            if let Some(sender) = &self.event_sender {
+                // Ignore send errors (receiver dropped) on purpose
+                let _ = sender.send(super::item::StatusNotifierItemEvents::MenuEvent(
+                    DBusMenuEvents::MenuClick(id),
+                ));
+            }
+        }
+    }
 
     // TODO: This is not done.
     pub async fn about_to_show(&self, id: i32) -> bool {
@@ -137,8 +149,14 @@ pub enum DBusMenuEvents {
 pub struct DBusMenu(zbus::Connection);
 
 impl DBusMenu {
-    pub async fn new(menu: Menu) -> zbus::Result<Self> {
-        let iface = DBusMenuInterface { menu };
+    pub async fn new(
+        menu: Menu,
+        event_sender: Sender<super::item::StatusNotifierItemEvents>,
+    ) -> zbus::Result<Self> {
+        let iface = DBusMenuInterface {
+            menu,
+            event_sender: Some(event_sender),
+        };
         let conn = zbus::connection::Builder::session()?
             .serve_at(DBUS_MENU_PATH, iface)?
             .build()

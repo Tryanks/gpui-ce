@@ -72,12 +72,12 @@ use super::{
 };
 
 use crate::{
-    AnyWindowHandle, Bounds, Capslock, CursorStyle, DOUBLE_CLICK_INTERVAL, DevicePixels, DisplayId,
-    FileDropEvent, ForegroundExecutor, KeyDownEvent, KeyUpEvent, Keystroke, LinuxCommon,
-    LinuxKeyboardLayout, Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent,
-    MouseExitEvent, MouseMoveEvent, MouseUpEvent, NavigationDirection, Pixels, PlatformDisplay,
-    PlatformInput, PlatformKeyboardLayout, Point, ResultExt as _, SCROLL_LINES, ScrollDelta,
-    ScrollWheelEvent, Size, TouchPhase, WindowParams, point, profiler, px, size,
+    AnyWindowHandle, Bounds, Capslock, CursorStyle, DevicePixels, DisplayId, FileDropEvent,
+    ForegroundExecutor, KeyDownEvent, KeyUpEvent, Keystroke, LinuxCommon, LinuxKeyboardLayout,
+    Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent,
+    MouseUpEvent, NavigationDirection, Pixels, PlatformDisplay, PlatformInput,
+    PlatformKeyboardLayout, Point, ScrollDelta, ScrollWheelEvent, Size, TouchPhase, WindowParams,
+    point, profiler, px, size,
 };
 use crate::{
     RunnableVariant, TaskTiming,
@@ -97,10 +97,10 @@ use crate::{
         xdg_desktop_portal::{Event as XDPEvent, XDPEventSource},
     },
 };
-use crate::platform::linux::xdg_desktop_portal::status_notifier::{
+use crate::platform::linux::xdg_desktop_portal::status_notifier::item::{
     StatusNotifierItem, StatusNotifierItemEvents, StatusNotifierItemOptions,
-    dbusmenu::DBusMenu,
 };
+use crate::platform::linux::platform::{DOUBLE_CLICK_INTERVAL, SCROLL_LINES};
 
 /// Used to convert evdev scancode to xkb scancode
 const MIN_KEYCODE: u32 = 8;
@@ -536,7 +536,7 @@ impl WaylandClient {
             .unwrap();
 
         // This could be unified with the notification handling in zed/main:fail_to_open_window.
-        let gpu_context = BladeContext::new().notify_err("Unable to init GPU context");
+        let gpu_context = BladeContext::new().expect("Unable to init GPU context");
 
         let seat = seat.unwrap();
         let globals = Globals::new(
@@ -814,12 +814,7 @@ impl LinuxClient for WaylandClient {
             .spawn({
                 let state = state.clone();
                 async move {
-                    let menu = if let Some(menu) = menu {
-                         DBusMenu::new(menu).await.log_err()
-                    } else {
-                        None
-                    };
-
+                    // Build the item and let it host the DBusMenu internally
                     let item = StatusNotifierItem::new(1, options, menu).await.log_err();
                     if let Some(item) = item {
                         let mut state = state.borrow_mut();
@@ -828,22 +823,24 @@ impl LinuxClient for WaylandClient {
                         }
                         state.common.tray_item_token = state
                             .loop_handle
-                            .insert_source(item, |event, _, client| {
-                                // TODO: Handle events
+                            .insert_source(item, move |event, _, client| {
                                 match event {
-                                    StatusNotifierItemEvents::Activate(x, y) => {
-                                        // Handle left click
-                                    }
-                                    StatusNotifierItemEvents::SecondaryActivate(x, y) => {
-                                        // Handle middle click
-                                    }
-                                    StatusNotifierItemEvents::MenuEvent(event) => {
-                                        // Handle menu event
+                                    StatusNotifierItemEvents::MenuEvent(crate::platform::linux::xdg_desktop_portal::status_notifier::dbusmenu::DBusMenuEvents::MenuClick(id)) => {
+                                        if let Some(client_rc) = client.0.upgrade() {
+                                            let mut state = client_rc.borrow_mut();
+                                            // Dispatch the associated action if any
+                                            if let Some(mut callback) = state.common.callbacks.app_menu_action.take() {
+                                                if let Some(action) = state.common.tray_menu_actions.get(&id).map(|a| a.boxed_clone()) {
+                                                    callback(&*action);
+                                                }
+                                                state.common.callbacks.app_menu_action = Some(callback);
+                                            }
+                                        }
                                     }
                                     _ => {}
                                 }
                             })
-                            .log_err().ok();
+                            .log_err();
                     }
                 }
             })
