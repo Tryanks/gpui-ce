@@ -536,7 +536,7 @@ impl WaylandClient {
             .unwrap();
 
         // This could be unified with the notification handling in zed/main:fail_to_open_window.
-        let gpu_context = BladeContext::new().notify_err("Unable to init GPU context");
+        let gpu_context = BladeContext::new().expect("Unable to init GPU context");
 
         let seat = seat.unwrap();
         let globals = Globals::new(
@@ -823,21 +823,24 @@ impl LinuxClient for WaylandClient {
                         }
                         state.common.tray_item_token = state
                             .loop_handle
-                            .insert_source(item, |event, _, client| {
+                            .insert_source(item, move |event, _, client| {
                                 match event {
-                                    StatusNotifierItemEvents::MenuEvent(super::dbusmenu::DBusMenuEvents::MenuClick(id)) => {
-                                        // Dispatch the associated action if any
-                                        if let Some(mut callback) = state.common.callbacks.app_menu_action.take() {
-                                            if let Some(action) = state.common.tray_menu_actions.get(&id).map(|a| a.boxed_clone()) {
-                                                callback(&*action);
+                                    StatusNotifierItemEvents::MenuEvent(crate::platform::linux::xdg_desktop_portal::status_notifier::dbusmenu::DBusMenuEvents::MenuClick(id)) => {
+                                        if let Some(client_rc) = client.0.upgrade() {
+                                            let mut state = client_rc.borrow_mut();
+                                            // Dispatch the associated action if any
+                                            if let Some(mut callback) = state.common.callbacks.app_menu_action.take() {
+                                                if let Some(action) = state.common.tray_menu_actions.get(&id).map(|a| a.boxed_clone()) {
+                                                    callback(&*action);
+                                                }
+                                                state.common.callbacks.app_menu_action = Some(callback);
                                             }
-                                            state.common.callbacks.app_menu_action = Some(callback);
                                         }
                                     }
                                     _ => {}
                                 }
                             })
-                            .log_err().ok();
+                            .log_err();
                     }
                 }
             })

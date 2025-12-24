@@ -1,24 +1,39 @@
 use futures::channel::oneshot;
 use xkbcommon::xkb::{self, Keysym, Keycode, State};
 use util::command::{new_smol_command, new_std_command};
-use crate::{
-    Action, AnyWindowHandle, BackgroundExecutor, ClipboardItem, CursorStyle, ForegroundExecutor,
-    Keymap, Menu, MenuItem, OwnedMenu, PathPromptOptions, Platform, PlatformKeyboardMapper,
-    PlatformTextSystem, PlatformWindow, RunnableVariant, Task, Tray, WindowAppearance,
-    WindowParams,
+use anyhow::{anyhow, Context, Result};
+use calloop::{LoopSignal, RegistrationToken};
+use std::{
+    collections::HashMap,
+    env,
+    ffi::OsString,
+    fs::File,
+    future::Future,
+    io::Read,
+    os::fd::{AsFd, AsRawFd, FromRawFd},
+    path::{Path, PathBuf},
+    rc::Rc,
+    sync::Arc,
+    time::Duration,
 };
-use crate::platform::linux::xdg_desktop_portal::status_notifier::dbusmenu::{DBusMenu, Submenu};
+use crate::{
+    Action, AnyWindowHandle, BackgroundExecutor, ClipboardItem, CursorStyle, DisplayId,
+    ForegroundExecutor, Keymap, Menu, MenuItem, OwnedMenu, PathPromptOptions, Pixels, Platform,
+    PlatformDisplay, PlatformKeyboardLayout, PlatformKeyboardMapper, PlatformTextSystem,
+    PlatformWindow, Point, RunnableVariant, Task, Tray, WindowAppearance, WindowParams,
+};
 use crate::platform::linux::dispatcher::{LinuxDispatcher, PriorityQueueCalloopReceiver};
+use crate::platform::linux::xdg_desktop_portal::status_notifier::dbusmenu::Submenu;
 use crate::platform::linux::xdg_desktop_portal::status_notifier::item::{
     Category, Icon, Pixmap, Status, StatusNotifierItemOptions, ToolTip,
 };
 use crate::platform::linux::xdg_desktop_portal::status_notifier::item::{
     StatusNotifierItem, StatusNotifierItemEvents,
 };
-use crate::{DisplayId, PlatformDisplay, PlatformKeyboardLayout};
-use calloop::{LoopSignal, RegistrationToken};
+use util::ResultExt as _;
 
-// ...
+// Keyring label used for storing credentials via oo7
+const KEYRING_LABEL: &str = "GPUI Credentials";
 
 pub trait LinuxClient {
     fn compositor_name(&self) -> &'static str;
@@ -482,8 +497,8 @@ impl<P: LinuxClient + 'static> Platform for P {
             )
             .icon(if let Some(icon) = tray.icon_data.take() {
                 Icon::Pixmaps(vec![Pixmap {
-                    width: icon.width,
-                    height: icon.height,
+                    width: icon.width as i32,
+                    height: icon.height as i32,
                     bytes: icon.data.to_vec(),
                 }])
             } else {
@@ -513,7 +528,8 @@ impl<P: LinuxClient + 'static> Platform for P {
     }
 
     fn set_cursor_style(&self, style: CursorStyle) {
-        self.set_cursor_style(style)
+        // Delegate to the LinuxClient implementation to avoid recursion
+        LinuxClient::set_cursor_style(self, style)
     }
 
     fn should_auto_hide_scrollbars(&self) -> bool {

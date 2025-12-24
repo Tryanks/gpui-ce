@@ -440,7 +440,7 @@ impl X11Client {
             .to_string();
         let keyboard_layout = LinuxKeyboardLayout::new(layout_name.into());
 
-        let gpu_context = BladeContext::new().notify_err("Unable to init GPU context");
+        let gpu_context = BladeContext::new().expect("Unable to init GPU context");
 
         let resource_database = x11rb::resource_manager::new_from_default(&xcb_connection)
             .context("Failed to create resource database")?;
@@ -1721,9 +1721,10 @@ impl LinuxClient for X11Client {
                         }
                         state.common.tray_item_token = state
                             .loop_handle
-                            .insert_source(item, |event, _, client| {
+                            .insert_source(item, move |event, _, client| {
                                 match event {
-                                    StatusNotifierItemEvents::MenuEvent(super::dbusmenu::DBusMenuEvents::MenuClick(id)) => {
+                                    StatusNotifierItemEvents::MenuEvent(crate::platform::linux::xdg_desktop_portal::status_notifier::dbusmenu::DBusMenuEvents::MenuClick(id)) => {
+                                        let mut state = client.0.borrow_mut();
                                         if let Some(mut callback) = state.common.callbacks.app_menu_action.take() {
                                             if let Some(action) = state.common.tray_menu_actions.get(&id).map(|a| a.boxed_clone()) {
                                                 callback(&*action);
@@ -1734,7 +1735,7 @@ impl LinuxClient for X11Client {
                                     _ => {}
                                 }
                             })
-                            .log_err().ok();
+                            .log_err();
                     }
                 }
             })
