@@ -1,0 +1,16 @@
+{
+  "name": "gpui-ce",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "remoteUser": "vscode",
+  "updateRemoteUserUID": true,
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer"
+      ]
+    }
+  },
+  "postCreateCommand": "sudo mkdir -p /usr/local/cargo/git /usr/local/cargo/registry && sudo chown -R $(id -u):$(id -g) /usr/local/cargo && rustup show && rustup component add rustfmt clippy && cargo fetch"
+}
