@@ -1,6 +1,8 @@
 use std::fmt::Display;
 use std::str::FromStr;
 
+use calloop::channel::{self, Channel, Sender};
+use calloop::{EventSource, Poll, PostAction, Readiness, Token, TokenFactory};
 use zbus::object_server::InterfaceRef;
 use zbus::zvariant::{OwnedObjectPath, Structure, StructureBuilder};
 use zbus::{interface, object_server::SignalContext, zvariant::Type};
@@ -350,7 +352,12 @@ impl StatusNotifierItemInterface {
     pub async fn new_status(&self, cx: &SignalContext<'_>, status: String) -> zbus::Result<()>;
 }
 
-pub struct StatusNotifierItem(zbus::Connection, InterfaceRef<StatusNotifierItemInterface>);
+pub struct StatusNotifierItem {
+    conn: zbus::Connection,
+    iface_ref: InterfaceRef<StatusNotifierItemInterface>,
+    channel: Channel<StatusNotifierItemEvents>,
+    sender: Sender<StatusNotifierItemEvents>,
+}
 
 #[derive(Debug, Clone)]
 pub enum StatusNotifierItemEvents {
@@ -362,7 +369,7 @@ pub enum StatusNotifierItemEvents {
 }
 
 impl StatusNotifierItem {
-    pub async fn new(id: i32, options: StatusNotifierItemOptions, menu: Option<super::dbusmenu::DBusMenu>) -> zbus::Result<Self> {
+    pub async fn new(id: i32, options: StatusNotifierItemOptions, menu: Option<super::dbusmenu::Menu>) -> zbus::Result<Self> {
         let watcher = StatusNotifierWatcher::new().await?;
         let menu_path = if menu.is_some() {
             Some(
@@ -389,101 +396,134 @@ impl StatusNotifierItem {
             .serve_at(STATUS_NOTIFIER_ITEM_PATH, iface)?
             .build()
             .await?;
+        // Create an internal channel for emitting events to calloop
+        let (sender, channel) = channel::channel();
+
         if let Some(menu) = menu {
-            conn.object_server().at(DBUS_MENU_PATH, menu).await?;
+            // Host the DBusMenu interface on the same object server
+            let iface = DBusMenuInterface { menu, event_sender: Some(sender.clone()) };
+            conn.object_server().at(DBUS_MENU_PATH, iface).await?;
         }
         watcher.register_status_notifier_item(name).await?;
         let iface_ref = conn
             .object_server()
             .interface::<_, StatusNotifierItemInterface>(STATUS_NOTIFIER_ITEM_PATH)
             .await?;
-        Ok(Self(conn, iface_ref))
+        let this = Self { conn, iface_ref, channel, sender };
+
+        // Hook up interface callbacks to forward into our event stream
+        this.on_activate(Box::new({
+            let tx = this.sender.clone();
+            move |x, y| {
+                let _ = tx.send(StatusNotifierItemEvents::Activate(x, y));
+            }
+        })).await;
+        this.on_secondary_activate(Box::new({
+            let tx = this.sender.clone();
+            move |x, y| {
+                let _ = tx.send(StatusNotifierItemEvents::SecondaryActivate(x, y));
+            }
+        })).await;
+        this.on_scroll(Box::new({
+            let tx = this.sender.clone();
+            move |d, ori| {
+                let _ = tx.send(StatusNotifierItemEvents::Scroll(d, ori));
+            }
+        })).await;
+        this.on_provide_xdg_activation_token(Box::new({
+            let tx = this.sender.clone();
+            move |token| {
+                let _ = tx.send(StatusNotifierItemEvents::XdgActivationToken(token));
+            }
+        })).await;
+
+        Ok(this)
     }
 
     pub async fn on_context_menu(&self, fun: Box<dyn Fn(i32, i32) + Sync + Send>) {
-        let mut iface = self.1.get_mut().await;
+        let mut iface = self.iface_ref.get_mut().await;
         iface.callbacks.on_context_menu = Some(fun);
     }
 
     pub async fn on_activate(&self, fun: Box<dyn Fn(i32, i32) + Sync + Send>) {
-        let mut iface = self.1.get_mut().await;
+        let mut iface = self.iface_ref.get_mut().await;
         iface.callbacks.on_activate = Some(fun);
     }
 
     pub async fn on_secondary_activate(&self, fun: Box<dyn Fn(i32, i32) + Sync + Send>) {
-        let mut iface = self.1.get_mut().await;
+        let mut iface = self.iface_ref.get_mut().await;
         iface.callbacks.on_secondary_activate = Some(fun);
     }
 
     pub async fn on_scroll(&self, fun: Box<dyn Fn(i32, String) + Sync + Send>) {
-        let mut iface = self.1.get_mut().await;
+        let mut iface = self.iface_ref.get_mut().await;
         iface.callbacks.on_scroll = Some(fun);
     }
 
     pub async fn on_provide_xdg_activation_token(&self, fun: Box<dyn Fn(String) + Sync + Send>) {
-        let mut iface = self.1.get_mut().await;
+        let mut iface = self.iface_ref.get_mut().await;
         iface.callbacks.on_provide_xdg_activation_token = Some(fun);
     }
 
     pub async fn set_title(&self, name: impl Into<String>) -> zbus::Result<()> {
-        let cx = self.1.signal_context();
-        let mut iface = self.1.get_mut().await;
+        let cx = self.iface_ref.signal_context();
+        let mut iface = self.iface_ref.get_mut().await;
         iface.options.title = name.into();
         iface.new_title(cx).await?;
         Ok(())
     }
 
     pub async fn set_icon(&self, icon: Icon) -> zbus::Result<()> {
-        let cx = self.1.signal_context();
-        let mut iface = self.1.get_mut().await;
+        let cx = self.iface_ref.signal_context();
+        let mut iface = self.iface_ref.get_mut().await;
         iface.options.icon = icon;
         iface.new_icon(cx).await?;
         Ok(())
     }
 
     pub async fn set_overlay(&self, overlay: Icon) -> zbus::Result<()> {
-        let cx = self.1.signal_context();
-        let mut iface = self.1.get_mut().await;
+        let cx = self.iface_ref.signal_context();
+        let mut iface = self.iface_ref.get_mut().await;
         iface.options.overlay = overlay;
         iface.new_icon(cx).await?;
         Ok(())
     }
 
     pub async fn set_attention(&self, attention: Attention) -> zbus::Result<()> {
-        let cx = self.1.signal_context();
-        let mut iface = self.1.get_mut().await;
+        let cx = self.iface_ref.signal_context();
+        let mut iface = self.iface_ref.get_mut().await;
         iface.options.attention = attention;
         iface.new_icon(cx).await?;
         Ok(())
     }
 
     pub async fn set_tooltip(&self, tooltip: ToolTip) -> zbus::Result<()> {
-        let cx = self.1.signal_context();
-        let mut iface = self.1.get_mut().await;
+        let cx = self.iface_ref.signal_context();
+        let mut iface = self.iface_ref.get_mut().await;
         iface.options.tooltip = tooltip;
         iface.new_tooltip(cx).await?;
         Ok(())
     }
 
     pub async fn set_tooltip_title(&self, title: String) -> zbus::Result<()> {
-        let cx = self.1.signal_context();
-        let mut iface = self.1.get_mut().await;
+        let cx = self.iface_ref.signal_context();
+        let mut iface = self.iface_ref.get_mut().await;
         iface.options.tooltip.title = title;
         iface.new_tooltip(cx).await?;
         Ok(())
     }
 
     pub async fn set_tooltip_description(&self, description: String) -> zbus::Result<()> {
-        let cx = self.1.signal_context();
-        let mut iface = self.1.get_mut().await;
+        let cx = self.iface_ref.signal_context();
+        let mut iface = self.iface_ref.get_mut().await;
         iface.options.tooltip.description = description;
         iface.new_tooltip(cx).await?;
         Ok(())
     }
 
     pub async fn set_status(&self, status: Status) -> zbus::Result<()> {
-        let cx = self.1.signal_context();
-        let mut iface = self.1.get_mut().await;
+        let cx = self.iface_ref.signal_context();
+        let mut iface = self.iface_ref.get_mut().await;
         let status_str = status.to_string();
         iface.options.status = status;
         iface.new_status(cx, status_str).await?;
@@ -491,8 +531,8 @@ impl StatusNotifierItem {
     }
 
     pub async fn set_category(&self, category: Category) -> zbus::Result<()> {
-        let cx = self.1.signal_context();
-        let mut iface = self.1.get_mut().await;
+        let cx = self.iface_ref.signal_context();
+        let mut iface = self.iface_ref.get_mut().await;
         let category_str = category.to_string();
         iface.options.category = category;
         iface.new_status(cx, category_str).await?;
@@ -500,41 +540,38 @@ impl StatusNotifierItem {
     }
 }
 
-impl calloop::EventSource for StatusNotifierItem {
+impl EventSource for StatusNotifierItem {
     type Event = StatusNotifierItemEvents;
     type Metadata = ();
     type Ret = ();
-    type Error = std::io::Error;
+    type Error = anyhow::Error;
 
     fn process_events<F>(
         &mut self,
-        _readiness: calloop::Readiness,
-        _token: calloop::Token,
-        mut _callback: F,
-    ) -> Result<calloop::PostAction, Self::Error>
+        readiness: Readiness,
+        token: Token,
+        mut callback: F,
+    ) -> Result<PostAction, Self::Error>
     where
         F: FnMut(Self::Event, &mut Self::Metadata) -> Self::Ret,
     {
-        Ok(calloop::PostAction::Continue)
+        self.channel.process_events(readiness, token, |evt, _| {
+            if let calloop::channel::Event::Msg(msg) = evt {
+                (callback)(msg, &mut ())
+            }
+        })?;
+        Ok(PostAction::Continue)
     }
 
-    fn register(
-        &mut self,
-        _poll: &mut calloop::Poll,
-        _token_factory: &mut calloop::TokenFactory,
-    ) -> calloop::Result<()> {
-        Ok(())
+    fn register(&mut self, poll: &mut Poll, token_factory: &mut TokenFactory) -> calloop::Result<()> {
+        self.channel.register(poll, token_factory)
     }
 
-    fn reregister(
-        &mut self,
-        _poll: &mut calloop::Poll,
-        _token_factory: &mut calloop::TokenFactory,
-    ) -> calloop::Result<()> {
-        Ok(())
+    fn reregister(&mut self, poll: &mut Poll, token_factory: &mut TokenFactory) -> calloop::Result<()> {
+        self.channel.reregister(poll, token_factory)
     }
 
-    fn unregister(&mut self, _poll: &mut calloop::Poll) -> calloop::Result<()> {
-        Ok(())
+    fn unregister(&mut self, poll: &mut Poll) -> calloop::Result<()> {
+        self.channel.unregister(poll)
     }
 }

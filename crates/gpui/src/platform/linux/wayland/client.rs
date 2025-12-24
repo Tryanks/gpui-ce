@@ -97,7 +97,6 @@ use crate::{
         xdg_desktop_portal::{Event as XDPEvent, XDPEventSource},
     },
 };
-use crate::platform::linux::xdg_desktop_portal::status_notifier::dbusmenu::DBusMenu;
 use crate::platform::linux::xdg_desktop_portal::status_notifier::item::{
     StatusNotifierItem, StatusNotifierItemEvents, StatusNotifierItemOptions,
 };
@@ -815,12 +814,7 @@ impl LinuxClient for WaylandClient {
             .spawn({
                 let state = state.clone();
                 async move {
-                    let menu = if let Some(menu) = menu {
-                         DBusMenu::new(menu).await.log_err()
-                    } else {
-                        None
-                    };
-
+                    // Build the item and let it host the DBusMenu internally
                     let item = StatusNotifierItem::new(1, options, menu).await.log_err();
                     if let Some(item) = item {
                         let mut state = state.borrow_mut();
@@ -830,16 +824,15 @@ impl LinuxClient for WaylandClient {
                         state.common.tray_item_token = state
                             .loop_handle
                             .insert_source(item, |event, _, client| {
-                                // TODO: Handle events
                                 match event {
-                                    StatusNotifierItemEvents::Activate(x, y) => {
-                                        // Handle left click
-                                    }
-                                    StatusNotifierItemEvents::SecondaryActivate(x, y) => {
-                                        // Handle middle click
-                                    }
-                                    StatusNotifierItemEvents::MenuEvent(event) => {
-                                        // Handle menu event
+                                    StatusNotifierItemEvents::MenuEvent(super::dbusmenu::DBusMenuEvents::MenuClick(id)) => {
+                                        // Dispatch the associated action if any
+                                        if let Some(mut callback) = state.common.callbacks.app_menu_action.take() {
+                                            if let Some(action) = state.common.tray_menu_actions.get(&id).map(|a| a.boxed_clone()) {
+                                                callback(&*action);
+                                            }
+                                            state.common.callbacks.app_menu_action = Some(callback);
+                                        }
                                     }
                                     _ => {}
                                 }

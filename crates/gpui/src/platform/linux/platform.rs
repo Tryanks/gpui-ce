@@ -1,19 +1,3 @@
-use std::{
-    env,
-    path::{Path, PathBuf},
-    rc::Rc,
-    sync::Arc,
-};
-#[cfg(any(feature = "wayland", feature = "x11"))]
-use std::{
-    ffi::OsString,
-    fs::File,
-    io::Read as _,
-    os::fd::{AsFd, AsRawFd, FromRawFd},
-    time::Duration,
-};
-
-use anyhow::{Context as _, anyhow, Result};
 use futures::channel::oneshot;
 use xkbcommon::xkb::{self, Keysym, Keycode, State};
 use util::command::{new_smol_command, new_std_command};
@@ -103,6 +87,7 @@ pub(crate) struct LinuxCommon {
     pub(crate) signal: LoopSignal,
     pub(crate) menus: Vec<OwnedMenu>,
     pub(crate) tray_item_token: Option<RegistrationToken>,
+    pub(crate) tray_menu_actions: HashMap<i32, Box<dyn Action>>, // id -> action
 }
 
 impl LinuxCommon {
@@ -130,6 +115,7 @@ impl LinuxCommon {
             signal,
             menus: Vec::new(),
             tray_item_token: None,
+            tray_menu_actions: HashMap::new(),
         };
 
         (common, main_receiver)
@@ -504,8 +490,16 @@ impl<P: LinuxClient + 'static> Platform for P {
                 Icon::default()
             });
 
+        let mut options = options;
+        // Reflect visibility in status
+        options.status = if tray.visible { Status::Active } else { Status::Passive };
+
         let menu = menu.map(|menu| {
-            let children = create_submenu(menu);
+            let mut action_map: HashMap<i32, Box<dyn Action>> = HashMap::new();
+            let mut next_id: i32 = 1;
+            let children = create_submenu(menu, &mut next_id, &mut action_map);
+            // Store action map for click dispatch
+            self.with_common(|common| common.tray_menu_actions = action_map);
             crate::platform::linux::xdg_desktop_portal::status_notifier::dbusmenu::Menu { children }
         });
 
@@ -1085,25 +1079,35 @@ mod tests {
 }
 
 
-fn create_submenu(menu: Vec<MenuItem>) -> Vec<Submenu> {
+fn create_submenu(
+    menu: Vec<MenuItem>,
+    next_id: &mut i32,
+    action_map: &mut HashMap<i32, Box<dyn Action>>,
+) -> Vec<Submenu> {
     let mut submenus = Vec::new();
-    for (id, item) in menu.into_iter().enumerate() {
+    for item in menu.into_iter() {
         match item {
             MenuItem::Separator => {
                 // Separators not explicitly handled in simple struct yet.
             }
-            MenuItem::Action { name, .. } => {
+            MenuItem::Action { name, action, .. } => {
+                let id = *next_id;
+                *next_id += 1;
+                action_map.insert(id, action);
                 submenus.push(Submenu {
-                    id: id as i32,
+                    id,
                     label: Some(name.to_string()),
                     ..Default::default()
                 });
             }
             MenuItem::Submenu(sub) => {
+                let id = *next_id;
+                *next_id += 1;
+                let children = create_submenu(sub.items, next_id, action_map);
                 submenus.push(Submenu {
-                    id: id as i32,
+                    id,
                     label: Some(sub.name.to_string()),
-                    children: create_submenu(sub.items),
+                    children,
                     ..Default::default()
                 });
             }
@@ -1114,3 +1118,6 @@ fn create_submenu(menu: Vec<MenuItem>) -> Vec<Submenu> {
     }
     submenus
 }
+
+// Fallback messages for missing portals
+const FILE_PICKER_PORTAL_MISSING: &str = "File picker portal not found. Please install and run xdg-desktop-portal for your compositor (e.g., xdg-desktop-portal-gtk or xdg-desktop-portal-kde).";
